@@ -1,40 +1,24 @@
 // pages/api/me.ts
-import type { NextApiRequest, NextApiResponse } from 'next';
-import clientPromise from '@/lib/mongodb';
-import jwt from 'jsonwebtoken';
-import { ObjectId } from 'mongodb';
-
-const JWT_SECRET = process.env.NEXTAUTH_SECRET!;
+import type { NextApiRequest, NextApiResponse } from "next";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "./auth/[...nextauth]";
+import dbConnect from "@/lib/dbConnect";
+import UserModel from "@/lib/models/User";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Unauthorized' });
-  }
-  const token = authHeader.split(' ')[1];
+  const session = await getServerSession(req, res, authOptions);
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
-    const client = await clientPromise;
-    const db = client.db('gulfship');
-
-    if (req.method === 'GET') {
-      const user = await db.collection('users').findOne(
-        { _id: new ObjectId(decoded.id) },
-        { projection: { password: 0 } }
-      );
-      if (!user) return res.status(404).json({ message: 'User not found' });
-      return res.status(200).json(user);
-    } else if (req.method === 'POST') {
-      const { address } = req.body;
-      await db.collection('users').updateOne(
-        { _id: new ObjectId(decoded.id) },
-        { $set: { address } }
-      );
-      return res.status(200).json({ message: 'Profile updated' });
-    }
-    res.status(405).json({ message: 'Method not allowed' });
-  } catch (e) {
-    res.status(401).json({ message: 'Invalid token' });
+  if (!session || !session.user?.email) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
+
+  await dbConnect();
+
+  if (req.method === "GET") {
+    const user = await UserModel.findOne({ email: session.user.email }).select("-password").lean();
+    if (!user) return res.status(404).json({ error: "User not found" });
+    return res.status(200).json(user);
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
 }

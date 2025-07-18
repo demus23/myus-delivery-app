@@ -1,60 +1,34 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import clientPromise from '@/lib/mongodb';
-import jwt from 'jsonwebtoken';
-import { ObjectId } from 'mongodb';
-
-const JWT_SECRET = process.env.JWT_SECRET!;
+import type { NextApiRequest, NextApiResponse } from "next";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "./auth/[...nextauth]";
+import dbConnect from "@/lib/dbConnect";
+import UserModel from "@/lib/models/User";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const token = req.headers.authorization?.split(' ')[1];
+  const session = await getServerSession(req, res, authOptions);
 
-  if (!token) {
-    return res.status(401).json({ message: 'Unauthorized - No token provided' });
+  if (!session || !session.user || !session.user.email) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
-  let decoded: any;
-  try {
-    decoded = jwt.verify(token, JWT_SECRET);
-  } catch (err) {
-    return res.status(401).json({ message: 'Unauthorized - Invalid token' });
-  }
+  await dbConnect();
 
-  try {
-    const client = await clientPromise;
-    const db = client.db('gulfship');
+  if (req.method === "GET") {
+    const user = await UserModel.findOne({ email: session.user.email })
+      .select("-password")
+      .lean();
 
-    if (req.method === 'POST') {
-      const { tracking, courier, value, status } = req.body;
-
-      if (!tracking || !courier || !value || !status) {
-        return res.status(400).json({ message: 'Missing fields' });
-      }
-
-      const result = await db.collection('packages').insertOne({
-        tracking,
-        courier,
-        value,
-        status,
-        userId: new ObjectId(decoded.id),
-        createdAt: new Date(),
-      });
-
-      return res.status(201).json({ _id: result.insertedId, tracking, courier, value, status });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
     }
 
-    if (req.method === 'GET') {
-      const packages = await db
-        .collection('packages')
-        .find({ userId: new ObjectId(decoded.id) })
-        .sort({ createdAt: -1 })
-        .toArray();
-
-      return res.status(200).json(packages);
-    }
-
-    return res.status(405).json({ message: 'Method not allowed' });
-  } catch (error) {
-    console.error('Packages API error:', error);
-    return res.status(500).json({ message: 'Internal Server Error' });
+    return res.status(200).json({ user });
   }
+
+  // Optional: support update
+  // if (req.method === "PUT") {
+  //   // Handle profile update logic here
+  // }
+
+  return res.status(405).json({ error: "Method not allowed" });
 }

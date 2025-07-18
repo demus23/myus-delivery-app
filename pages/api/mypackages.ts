@@ -1,33 +1,38 @@
-// pages/api/mypackages.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import clientPromise from '@/lib/mongodb';
-import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.NEXTAUTH_SECRET!;
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from './auth/[...nextauth]';
+import dbConnect from '@/lib/dbConnect';
+import PackageModel from '@/lib/models/Package';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') return res.status(405).json({ message: 'Method not allowed' });
+  const session = await getServerSession(req, res, authOptions);
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!session || !session.user?.id) {
     return res.status(401).json({ message: 'Unauthorized' });
   }
-  const token = authHeader.split(' ')[1];
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
-    const client = await clientPromise;
-    const db = client.db('gulfship');
+  await dbConnect();
 
-    // Find packages where userId/email matches
-    // Adjust field as per your data, here using userId
-    const packages = await db
-      .collection('packages')
-      .find({ $or: [{ userId: decoded.id }, { email: decoded.email }] })
-      .toArray();
-
-    res.status(200).json(packages);
-  } catch (err) {
-    res.status(401).json({ message: 'Invalid token' });
+  if (req.method === 'GET') {
+    const packages = await PackageModel.find({ user: session.user.id }).sort({ createdAt: -1 }).lean();
+    return res.status(200).json(packages);
   }
+
+  if (req.method === 'POST') {
+    const { tracking, courier, value, status } = req.body;
+    if (!tracking || !courier || !value) {
+      return res.status(400).json({ message: 'Missing fields' });
+    }
+    const pkg = await PackageModel.create({
+      user: session.user.id,
+      tracking,
+      courier,
+      value,
+      status: status || 'Pending',
+      createdAt: new Date(),
+    });
+    return res.status(201).json(pkg);
+  }
+
+  return res.status(405).json({ message: 'Method not allowed' });
 }

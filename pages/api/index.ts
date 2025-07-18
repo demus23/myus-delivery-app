@@ -1,49 +1,28 @@
-import { NextApiRequest, NextApiResponse } from 'next';
-import clientPromise from '@/lib/mongodb';
-import jwt from 'jsonwebtoken';
+import type { NextApiRequest, NextApiResponse } from "next";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "./auth/[...nextauth]";
+import dbConnect from "@/lib/dbConnect";
+import PackageModel from "@/lib/models/Package";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const client = await clientPromise;
-  const db = client.db('gulfship');
-  const collection = db.collection('packages');
+  const session = await getServerSession(req, res, authOptions);
 
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.split(' ')[1];
-  let userId = null;
-
-  if (!token) return res.status(401).json({ message: 'No token' });
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!);
-    userId = (decoded as any).id;
-  } catch (err) {
-    return res.status(401).json({ message: 'Invalid token' });
+  if (!session || !session.user) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
-  if (req.method === 'GET') {
-    const data = await collection.find({ userId }).toArray();
-    return res.status(200).json(data);
-  }
+  await dbConnect();
 
-  if (req.method === 'POST') {
-    const { tracking, courier, value, status } = req.body;
-
-    if (!tracking || !courier || !value) {
-      return res.status(400).json({ message: 'Missing fields' });
+  // Only admins see all packages. Users only see theirs.
+  if (req.method === "GET") {
+    let packages;
+    if (session.user.role === "admin") {
+      packages = await PackageModel.find({}).lean();
+    } else {
+      packages = await PackageModel.find({ user: session.user.id }).lean();
     }
-
-    const newPackage = {
-      userId,
-      tracking,
-      courier,
-      value,
-      status: status || 'Pending',
-      createdAt: new Date(),
-    };
-
-    const result = await collection.insertOne(newPackage);
-    return res.status(200).json({ ...newPackage, _id: result.insertedId });
+    return res.status(200).json(packages);
   }
 
-  return res.status(405).json({ message: 'Method not allowed' });
+  return res.status(405).json({ error: "Method not allowed" });
 }

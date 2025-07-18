@@ -1,29 +1,29 @@
 // pages/api/admin/packages/[id].ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import clientPromise from "@/lib/mongodb";
-import { ObjectId } from "mongodb";
+import dbConnect from "@/lib/dbConnect";
+import PackageModel from "@/lib/models/Package";
+import { isValidObjectId } from "mongoose"; // cleaner than ObjectId from 'mongodb'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const client = await clientPromise;
-  const db = client.db("gulfship");
-  const collection = db.collection("packages");
+  await dbConnect();
   const { id } = req.query;
 
-  if (!ObjectId.isValid(id as string)) {
+  if (!isValidObjectId(id)) {
     return res.status(400).json({ message: "Invalid ID" });
   }
 
   if (req.method === "PUT") {
     const { suiteId, title, tracking, courier, status, value } = req.body;
-    await collection.updateOne(
-      { _id: new ObjectId(id as string) },
-      { $set: { suiteId, title, tracking, courier, status, value } }
+    await PackageModel.findByIdAndUpdate(
+      id,
+      { suiteId, title, tracking, courier, status, value },
+      { new: true }
     );
     return res.status(200).json({ message: "Package updated" });
   }
 
   if (req.method === "DELETE") {
-    await collection.deleteOne({ _id: new ObjectId(id as string) });
+    await PackageModel.findByIdAndDelete(id);
     return res.status(200).json({ message: "Package deleted" });
   }
 

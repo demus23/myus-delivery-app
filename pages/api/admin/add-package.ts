@@ -1,44 +1,36 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import clientPromise from '@/lib/mongodb';
-import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_key';
+import type { NextApiRequest, NextApiResponse } from "next";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
+import dbConnect from "@/lib/dbConnect";
+import PackageModel from "@/lib/models/Package";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
+  const session = await getServerSession(req, res, authOptions);
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Unauthorized' });
+  if (!session || session.user?.role !== "admin") {
+    return res.status(403).json({ error: "Unauthorized" });
   }
-  const token = authHeader.split(' ')[1];
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; role: string; email: string };
-    if (decoded.role !== 'admin') return res.status(403).json({ message: 'Forbidden: Admins only' });
+  if (req.method === "POST") {
+    await dbConnect();
+    const { title, tracking, courier, value, status, suiteId } = req.body;
 
-    const { title, description, status } = req.body;
-    if (!title) return res.status(400).json({ message: 'Title required' });
+    if (!title || !tracking || !courier || !value) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
 
-    const client = await clientPromise;
-    const db = client.db('gulfship');
-    const now = new Date();
-
-    const pkg = {
+    const pkg = await PackageModel.create({
       title,
-      description,
-      status: status || 'Pending',
-      createdAt: now,
-      adminCreatedBy: decoded.email,
-    };
+      tracking,
+      courier,
+      value,
+      status: status || "Pending",
+      suiteId: suiteId || "",
+      createdAt: new Date(),
+    });
 
-    const result = await db.collection('packages').insertOne(pkg);
-   (pkg as any)._id = result.insertedId;
-
-    res.status(200).json({ ...pkg, _id: result.insertedId });
-
-  } catch (error) {
-    console.error('Add package error:', error);
-    res.status(401).json({ message: 'Invalid token or add error' });
+    return res.status(201).json({ package: pkg });
   }
+
+  return res.status(405).json({ error: "Method not allowed" });
 }

@@ -1,31 +1,26 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import clientPromise from '@/lib/mongodb';
-import jwt from 'jsonwebtoken';
+import dbConnect from '@/lib/dbConnect';
+import PackageModel from '@/lib/models/Package';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../auth/[...nextauth]';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') {
-    return res.status(405).end(); // Method Not Allowed
-  }
+  const session = await getServerSession(req, res, authOptions);
 
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ message: 'Unauthorized: No token provided' });
-  }
+  await dbConnect();
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!);
-
-    if ((decoded as any).role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Admins only' });
+  if (req.method === "GET") {
+    // If admin, return all. Else, only user's own.
+    if (session?.user?.role === "admin") {
+      const packages = await PackageModel.find({}).sort({ createdAt: -1 }).lean();
+      return res.status(200).json({ packages });
+    } else if (session?.user?.id) {
+      const packages = await PackageModel.find({ user: session.user.id }).sort({ createdAt: -1 }).lean();
+      return res.status(200).json({ packages });
+    } else {
+      return res.status(401).json({ error: "Unauthorized" });
     }
-
-    const client = await clientPromise;
-    const db = client.db('gulfship');
-    const packages = await db.collection('packages').find({}).toArray();
-
-    return res.status(200).json(packages);
-  } catch (error) {
-    console.error(error);
-    return res.status(401).json({ message: 'Unauthorized: Invalid token' });
   }
+
+  return res.status(405).json({ error: "Method not allowed" });
 }

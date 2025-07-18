@@ -1,38 +1,29 @@
 // pages/api/admin/packages/index.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import clientPromise from "@/lib/mongodb"; // make sure this exists and works
+import dbConnect from "@/lib/dbConnect";
+import PackageModel from "@/lib/models/Package";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const client = await clientPromise;
-  const db = client.db("gulfship");
-  const collection = db.collection("packages");
+  await dbConnect();
 
   if (req.method === "GET") {
-    const pkgs = await collection.find().sort({ createdAt: -1 }).toArray();
-    const result = pkgs.map(p => ({
-      ...p,
-      _id: p._id.toString(),
-      createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : "",
-    }));
-    return res.status(200).json(result);
+    const packages = await PackageModel.find({}).sort({ createdAt: -1 }).lean();
+    // You can transform or filter fields as needed
+    return res.status(200).json(packages);
   }
 
   if (req.method === "POST") {
     const { suiteId, title, tracking, courier, status, value } = req.body;
-    const newPkg = {
+    const newPkg = await PackageModel.create({
       suiteId,
       title,
       tracking,
       courier,
       status,
       value,
-      createdAt: new Date().toISOString(),
-    };
-    const insertResult = await collection.insertOne(newPkg);
-    return res.status(201).json({
-      ...newPkg,
-      _id: insertResult.insertedId.toString(),
+      createdAt: new Date(),
     });
+    return res.status(201).json(newPkg);
   }
 
   return res.status(405).json({ message: "Method not allowed" });

@@ -1,51 +1,29 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import clientPromise from '@/lib/mongodb';
-import jwt from 'jsonwebtoken';
-import { ObjectId } from 'mongodb';
-
-const JWT_SECRET = process.env.NEXTAUTH_SECRET!;
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
+import dbConnect from "@/lib/dbConnect";
+import PackageModel from "@/lib/models/Package";
+import { Types } from "mongoose";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
+  if (req.method !== "PATCH") return res.status(405).json({ error: "Method not allowed" });
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Unauthorized' });
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user?.id) return res.status(401).json({ error: "Unauthorized" });
+
+  const { id, title, description, courier, value } = req.body;
+  if (!id || !Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid package ID" });
   }
-  const token = authHeader.split(' ')[1];
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string };
-    const { packageId, tracking, courier, value } = req.body;
-    if (!packageId || !tracking || !courier || !value) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
+  await dbConnect();
+  // Only allow editing own "Pending" packages
+  const pkg = await PackageModel.findOneAndUpdate(
+    { _id: id, user: session.user.id, status: "Pending" },
+    { title, description, courier, value },
+    { new: true }
+  );
+  if (!pkg) return res.status(404).json({ error: "Package not found or cannot be edited" });
 
-    const client = await clientPromise;
-    const db = client.db('gulfship');
-
-    // Only allow editing your own pending packages
-    const result = await db.collection('packages').updateOne(
-      {
-        _id: new ObjectId(packageId),
-        $or: [{ userId: decoded.id }, { email: decoded.email }],
-        status: 'Pending'
-      },
-      {
-        $set: {
-          tracking,
-          courier,
-          value
-        }
-      }
-    );
-
-    if (result.modifiedCount === 1) {
-      res.status(200).json({ success: true });
-    } else {
-      res.status(404).json({ message: 'Not found or cannot edit (only Pending allowed)' });
-    }
-  } catch (err) {
-    res.status(401).json({ message: 'Invalid token' });
-  }
+  res.status(200).json({ message: "Package updated", package: pkg });
 }
