@@ -1,13 +1,20 @@
-import 'bootstrap/dist/css/bootstrap.min.css';
-import { SessionProvider } from "next-auth/react";
-import type { AppProps } from "next/app";
-import '../styles/globals.css'
+import 'bootstrap/dist/css/bootstrap.min.css'
+import 'bootstrap-icons/font/bootstrap-icons.css'
+import { AppProps } from 'next/app'
+import { ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
+import { SessionProvider } from "next-auth/react"
+import { MantineProvider } from '@mantine/core';
 
-
-export default function MyApp({ Component, pageProps: { session, ...pageProps } }: AppProps) {
+export default function MyApp({ Component, pageProps }: AppProps) {
   return (
-    <SessionProvider session={session}>
-      <Component {...pageProps} />
+    <MantineProvider>
+    <SessionProvider session={pageProps.session}>
+      <>
+        <Component {...pageProps} />
+        <ToastContainer position="top-right" autoClose={3000} />
+      </>
     </SessionProvider>
-  );
+    </MantineProvider>
+  )
 }

@@ -1,0 +1,21 @@
+{
+  "functions": {
+    "pages/api/webhooks/stripe.ts": {
+      "maxDuration": 10,
+      "memory": 512
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/webhooks/stripe",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" },
+        {"key":"Referrer-Policy","value":"strict-origin-when-cross-origin"},
+      {"key":"X-Content-Type-Options","value":"nosniff"},
+      {"key":"X-Frame-Options","value":"SAMEORIGIN"},
+      {"key":"Permissions-Policy","value":"geolocation=(), microphone=(), camera=()"}
+      ]
+    }
+  ]
+  
+}

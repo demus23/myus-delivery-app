@@ -1,8 +1,129 @@
+@import "tw-animate-css";
+
+
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ===== Background gradient for the whole app ===== */
+body {
+  min-height: 100vh;
+  background: linear-gradient(120deg, #f8fafc 0%, #e0e7ef 100%);
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+}
+
+/* ===== Dashboard sidebar modern style ===== */
+.sidebar {
+  background: linear-gradient(135deg, #1e293b 80%, #2563eb 100%);
+  color: #fff;
+  min-height: 100vh;
+  box-shadow: 2px 0 16px 0 rgba(30,41,59,.07);
+}
+.sidebar .active,
+.sidebar a:hover {
+  background: rgba(255,255,255,0.10);
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+/* ===== Dashboard main cards ===== */
+.card {
+  box-shadow: 0 2px 12px 0 rgba(34,60,80,.09);
+  border-radius: 16px;
+  background: #fff;
+  border: none;
+  transition: box-shadow 0.2s;
+}
+.card:hover {
+  box-shadow: 0 6px 24px 0 rgba(34,60,80,.18);
+}
+
+/* ===== Heading styles ===== */
+h1, .dashboard-title {
+  font-size: 2.3rem;
+  font-weight: 800;
+  color: #1e293b;
+  letter-spacing: -1px;
+  margin-bottom: 0.6em;
+}
+
+/* ===== Quick stat cards ===== */
+.quick-stat {
+  border-radius: 16px;
+  background: linear-gradient(100deg, #e0eaff 50%, #fff 100%);
+  box-shadow: 0 1px 6px rgba(34,60,80,.08);
+  text-align: center;
+  padding: 1.3em 0.7em;
+  font-size: 1.2rem;
+}
+
+/* ====== Custom status badges ====== */
 .admin-row:hover {
   background: #f0f6fa !important;
   transition: background 0.2s;
+}
+.status-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 1em;
+  font-size: 13px;
+  font-weight: bold;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.status-badge.pending {
+  background: #fffbe7;
+  color: #b99806;
+  border: 1px solid #ffe580;
+}
+.status-badge.shipped {
+  background: #e6f0ff;
+  color: #1754a1;
+  border: 1px solid #97c0fa;
+}
+.status-badge.delivered {
+  background: #e7ffe7;
+  color: #107c10;
+  border: 1px solid #7affaa;
+}
+.status-badge.cancelled {
+  background: #ffeaea;
+  color: #c82333;
+  border: 1px solid #ffa6a6;
+}
+
+/* ===== Avatar & Logo ===== */
+.avatar {
+  border-radius: 50%;
+  border: 2px solid #2563eb;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.10);
+}
+
+/* ===== Nice button for sidebar ===== */
+.sidebar .btn {
+  background: rgba(255,255,255,0.07);
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 500;
+  border: none;
+  transition: background .2s;
+}
+.sidebar .btn:hover {
+  background: rgba(37,99,235,0.3);
+  color: #fff;
+}
+
+/* ===== Main container padding (for spacing) ===== */
+.main-container {
+  padding: 2.5rem 2rem 1.5rem 2rem;
+}
+
+/* ===== Responsive tweaks ===== */
+@media (max-width: 700px) {
+  .sidebar { min-width: 56px; padding: 8px !important; }
+  .main-container { padding: 1rem 4vw; }
+  .card, .quick-stat { border-radius: 8px; }
 }

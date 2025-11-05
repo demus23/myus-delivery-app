@@ -1,3 +1,4 @@
+//pages\api\packages\[id].ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import dbConnect from '@/lib/dbConnect';
 import PackageModel from '@/lib/models/Package';

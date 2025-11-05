@@ -1,24 +1,22 @@
 // lib/dbConnect.ts
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const MONGODB_URI = process.env.MONGODB_URI as string;
+const MONGODB_URI = process.env.MONGODB_URI!;
+if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
 
-if (!MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI in .env.local');
+declare global {
+   
+  var _mongoose: { conn: typeof mongoose | null; promise: Promise<typeof mongoose> | null } | undefined;
 }
 
-let cached = (global as any).mongoose || { conn: null, promise: null };
+const cached = global._mongoose || { conn: null, promise: null as any };
 
-async function dbConnect() {
+export default async function dbConnect() {
   if (cached.conn) return cached.conn;
-
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI).then((mongoose) => mongoose);
+    cached.promise = mongoose.connect(MONGODB_URI, { maxPoolSize: 10 } as any);
   }
-
   cached.conn = await cached.promise;
+  global._mongoose = cached;
   return cached.conn;
 }
-
-export default dbConnect;
-

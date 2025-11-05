@@ -27,7 +27,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (exists) return res.status(409).json({ message: 'Email already registered.' });
 
   // Get next suiteId number (atomic)
-  let counter = await Counter.findOneAndUpdate(
+  const counter = await Counter.findOneAndUpdate(
     { name: "suiteId" },
     { $inc: { value: 1 } },
     { new: true, upsert: true }

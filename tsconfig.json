@@ -1,4 +1,4 @@
-  {
+{
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
@@ -20,7 +20,6 @@
     "incremental": true,
     "typeRoots": ["./types", "./node_modules/@types"]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "types/**/*.d.ts", "middleware.ts.bak"],
-  "exclude": ["node_modules"]
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "types/**/*.d.ts", "middleware.ts", "scripts/createIndexes.js"],
+  "exclude": ["node_modules", "mantine-test/**", "scripts/**", "**/*.spec.ts"]
 }
-
