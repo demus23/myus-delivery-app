@@ -63,10 +63,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   // token check (only skip if you intentionally want to open it)
-  const tok = req.headers["x-webhook-token"];
-  if (!TOKEN || tok !== TOKEN) {
-    return res.status(401).json({ ok: false, error: "Unauthorized" });
-  }
+  const headerVal =
+  req.headers["x-webhook-token"] ??
+  req.headers["x-ship-track-token"] ??
+  req.headers["x-api-key"];
+
+const tok = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+const TOKEN = process.env.SHIP_TRACK_WEBHOOK_TOKEN || "";
+
+console.log("[track-webhook] tokLen:", tok ? String(tok).length : 0, "envLen:", TOKEN.length);
+
+if (!TOKEN || !tok || tok !== TOKEN) {
+  return res.status(401).json({ ok: false, error: "Unauthorized" });
+}
+
 
   await dbConnect();
 

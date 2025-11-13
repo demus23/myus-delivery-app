@@ -18,7 +18,7 @@ export default function AdminShipments() {
   const [form, setForm] = React.useState({
     orderId: "SO-12345",
     currency: "AED",
-    customerEmail: "", // used for label email
+    customerEmail: "",
     to:   { name: "Ali",        line1: "Street 1", city: "Dubai",  postalCode: "00000", country: "AE" },
     from: { name: "Warehouse", line1: "Dock 5",   city: "Dubai",  postalCode: "00000", country: "AE" },
     parcel: { length: 20, width: 15, height: 10, weight: 800 },
@@ -36,11 +36,12 @@ export default function AdminShipments() {
   // Recent table
   const [rows, setRows] = React.useState<any[]>([]);
 
-  // CSV export filters
-  const [exportStatus, setExportStatus] = React.useState<string>(""); // e.g. "delivered,label_purchased"
-  const [exportFrom, setExportFrom]     = React.useState<string>("");
-  const [exportTo, setExportTo]         = React.useState<string>("");
+  // (Optional) CSV controls – left in place but button hidden unless you add the export API
+  const [exportStatus, setExportStatus] = React.useState<string>("");
+  const [exportFrom, setExportFrom] = React.useState<string>("");
+  const [exportTo, setExportTo] = React.useState<string>("");
 
+  // ---- helpers ----
   function buildExportUrl(params: { status?: string; from?: string; to?: string; limit?: number } = {}) {
     const u = new URL("/api/admin/shipments/export", window.location.origin);
     if (params.status) u.searchParams.set("status", params.status);
@@ -52,15 +53,34 @@ export default function AdminShipments() {
 
   async function refreshList() {
     try {
-      const r = await fetch("/api/admin/shipments?limit=20");
+      const r = await fetch("/api/admin/shipments?limit=20", { credentials: "include" });
       const j = await r.json();
       if (j?.ok) setRows(j.data.items || j.data || []);
     } catch (e) {
       console.error(e);
     }
   }
-
   React.useEffect(() => { refreshList(); }, []);
+
+  // Call real webhook via secure server proxy (no secret in browser)
+  async function simulateTracking(payload: {
+    trackingNumber?: string | null;
+    providerShipmentId?: string | null;
+    status: "in_transit" | "out_for_delivery" | "delivered" | "exception" | "return_to_sender";
+  }) {
+    const r = await fetch("/api/admin/shipments/simulate-webhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        trackingNumber: payload.trackingNumber || undefined,
+        providerShipmentId: payload.providerShipmentId || undefined,
+        status: payload.status,
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.forward?.error || j?.error || "Failed");
+  }
 
   async function getRates() {
     setLoading(true);
@@ -72,7 +92,7 @@ export default function AdminShipments() {
       const r = await fetch("/api/shipping/rates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form), // includes customerEmail for later emailing
+        body: JSON.stringify(form),
       });
       const j = await r.json();
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Failed to get rates");
@@ -80,12 +100,9 @@ export default function AdminShipments() {
       setRates(j.data.rates || []);
       setSelectedRate(null);
       setMessage(`Found ${j.data.rates.length} rate(s).`);
-   } catch (e: unknown) {
-  const msg =
-    e instanceof Error ? e.message :
-    typeof e === "string" ? e :
-    "Error";
-  setMessage(msg);     
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "Error";
+      setMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -110,12 +127,9 @@ export default function AdminShipments() {
       setService(j.data.service || null);
       setMessage("Label purchased.");
       await refreshList();
-      } catch (e: unknown) {
-  const msg =
-    e instanceof Error ? e.message :
-    typeof e === "string" ? e :
-    "Error";
-  setMessage(msg);  
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "Error";
+      setMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -126,22 +140,13 @@ export default function AdminShipments() {
     setLoading(true);
     setMessage(null);
     try {
-      const r = await fetch("/api/admin/shipments/mark-delivered", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shipmentId, trackingNumber, status: "delivered" }),
-      });
-      const j = await r.json();
-      if (!r.ok || !j?.ok) throw new Error(j?.error || "Failed to update");
+      await simulateTracking({ trackingNumber, status: "delivered" });
       setStatus("delivered");
       setMessage("Shipment marked delivered.");
       await refreshList();
-      } catch (e: unknown) {
-  const msg =
-    e instanceof Error ? e.message :
-    typeof e === "string" ? e :
-    "Error";
-  setMessage(msg);  
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "Error";
+      setMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -159,17 +164,15 @@ export default function AdminShipments() {
       const r = await fetch("/api/admin/shipments/send-label-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const j = await r.json();
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Failed to send email");
       setMessage("Label email sent.");
-     } catch (e: unknown) {
-  const msg =
-    e instanceof Error ? e.message :
-    typeof e === "string" ? e :
-    "Error";
-  setMessage(msg);  
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "Error";
+      setMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -183,25 +186,21 @@ export default function AdminShipments() {
 
         {/* Create/Get rates form */}
         <div className="space-y-3 p-4 border rounded-lg">
-          {/* Row 1: order + currency + customer email */}
           <div className="grid grid-cols-3 gap-3">
             <label className="text-sm">Order ID
-              <input
-                className="mt-1 w-full border rounded px-2 py-1"
+              <input className="mt-1 w-full border rounded px-2 py-1"
                 value={form.orderId}
                 onChange={e => setForm(f => ({ ...f, orderId: e.target.value }))}
               />
             </label>
             <label className="text-sm">Currency
-              <input
-                className="mt-1 w-full border rounded px-2 py-1"
+              <input className="mt-1 w-full border rounded px-2 py-1"
                 value={form.currency}
                 onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
               />
             </label>
             <label className="text-sm">Customer Email
-              <input
-                className="mt-1 w-full border rounded px-2 py-1"
+              <input className="mt-1 w-full border rounded px-2 py-1"
                 value={form.customerEmail}
                 onChange={e => setForm(f => ({ ...f, customerEmail: e.target.value }))}
                 placeholder="customer@example.com"
@@ -209,38 +208,29 @@ export default function AdminShipments() {
             </label>
           </div>
 
-          {/* Row 2: addresses */}
           <div className="grid grid-cols-2 gap-3">
             <label className="text-sm">To (line1)
-              <input
-                className="mt-1 w-full border rounded px-2 py-1"
+              <input className="mt-1 w-full border rounded px-2 py-1"
                 value={form.to.line1}
                 onChange={e => setForm(f => ({ ...f, to: { ...f.to, line1: e.target.value } }))}
               />
             </label>
             <label className="text-sm">From (line1)
-              <input
-                className="mt-1 w-full border rounded px-2 py-1"
+              <input className="mt-1 w-full border rounded px-2 py-1"
                 value={form.from.line1}
                 onChange={e => setForm(f => ({ ...f, from: { ...f.from, line1: e.target.value } }))}
               />
             </label>
           </div>
 
-          {/* Row 3: parcel */}
           <div className="grid grid-cols-4 gap-3">
             {(["length","width","height","weight"] as const).map(k => (
               <label key={k} className="text-sm capitalize">
                 {k}
-                <input
-                  type="number"
-                  className="mt-1 w-full border rounded px-2 py-1"
+                <input type="number" className="mt-1 w-full border rounded px-2 py-1"
                   value={(form.parcel as any)[k]}
                   onChange={e =>
-                    setForm(f => ({
-                      ...f,
-                      parcel: { ...f.parcel, [k]: Number(e.target.value) || 0 },
-                    }))
+                    setForm(f => ({ ...f, parcel: { ...f.parcel, [k]: Number(e.target.value) || 0 } }))
                   }
                 />
               </label>
@@ -329,6 +319,8 @@ export default function AdminShipments() {
         <div className="mt-10 p-4 border rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-medium">Recent Shipments</h2>
+
+            {/* CSV button disabled until export API is added */}
             <div className="flex items-center gap-2">
               <input
                 className="border rounded px-2 py-1 text-sm"
@@ -349,6 +341,7 @@ export default function AdminShipments() {
                 value={exportTo}
                 onChange={(e) => setExportTo(e.target.value)}
               />
+              {/* Uncomment when /api/admin/shipments/export exists
               <button
                 className="px-3 py-1 rounded border"
                 onClick={() => {
@@ -362,7 +355,7 @@ export default function AdminShipments() {
                 }}
               >
                 Download CSV
-              </button>
+              </button> */}
               <button className="px-3 py-1 rounded border" onClick={refreshList} disabled={loading}>
                 Refresh
               </button>
@@ -400,51 +393,47 @@ export default function AdminShipments() {
                     <td className="py-2">
                       <div className="flex gap-2">
                         <button
-                          className="px-2 py-1 rounded border disabled:opacity-50"
-                          onClick={async () => {
-                            await fetch("/api/admin/shipments/mark-delivered", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                shipmentId: r._id,
-                                trackingNumber: r.trackingNumber,
-                                status: "delivered",
-                              }),
-                            });
+                          className="px-2 py-1 rounded border"
+                          onClick={async () => { try {
+                            await simulateTracking({ trackingNumber: r.trackingNumber, status: "in_transit" });
                             await refreshList();
-                          }}
-                          disabled={r.status === "delivered"}
+                          } catch(e){ console.error(e); } }}
                         >
-                          Mark delivered
+                          In-transit
                         </button>
-
+                        <button
+                          className="px-2 py-1 rounded border"
+                          onClick={async () => { try {
+                            await simulateTracking({ trackingNumber: r.trackingNumber, status: "out_for_delivery" });
+                            await refreshList();
+                          } catch(e){ console.error(e); } }}
+                        >
+                          Out for delivery
+                        </button>
+                        <button
+                          className="px-2 py-1 rounded bg-green-600 text-white disabled:opacity-50"
+                          disabled={r.status === "delivered"}
+                          onClick={async () => { try {
+                            await simulateTracking({ trackingNumber: r.trackingNumber, status: "delivered" });
+                            await refreshList();
+                          } catch(e){ console.error(e); } }}
+                        >
+                          Delivered
+                        </button>
+                        <button
+                          className="px-2 py-1 rounded border"
+                          onClick={async () => { try {
+                            await simulateTracking({ trackingNumber: r.trackingNumber, status: "exception" });
+                            await refreshList();
+                          } catch(e){ console.error(e); } }}
+                        >
+                          Exception
+                        </button>
                         <button
                           className="px-2 py-1 rounded border"
                           onClick={() => resendEmail(String(r._id))}
                         >
                           Resend email
-                        </button>
-
-                        {/* Dev helper: simulate a tracking hop for mock provider */}
-                        <button
-                          className="px-2 py-1 rounded border"
-                          onClick={async () => {
-                            await fetch("/api/shipping/track-webhook", {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                                // For dev only; must match your server's expected token
-                                "x-webhook-token": "something",
-                              },
-                              body: JSON.stringify({
-                                trackingNumber: r.trackingNumber,
-                                status: "in_transit",
-                              }),
-                            });
-                            await refreshList();
-                          }}
-                        >
-                          Refresh tracking
                         </button>
                       </div>
                     </td>

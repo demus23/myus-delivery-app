@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // ===== Simple token-bucket limiter (per-IP, edge runtime) =====
-// 60 requests per 10 minutes per IP
 const CAPACITY = 60;
 const WINDOW_MS = 10 * 60 * 1000;
 const FILL_RATE = CAPACITY / WINDOW_MS; // tokens per ms
@@ -11,17 +10,13 @@ type Bucket = { tokens: number; last: number };
 const buckets = new Map<string, Bucket>();
 
 function getIp(req: NextRequest) {
-  // Prefer standard proxy headers; NextRequest doesn't always expose `.ip` in types
   const xff = req.headers.get("x-forwarded-for");
   if (xff) {
-    // Take the first IP in the list
     const first = xff.split(",")[0]?.trim();
     if (first) return first;
   }
   const real = req.headers.get("x-real-ip");
   if (real) return real.trim();
-
-  // As a last resort, key by user-agent + accept-language to avoid total collapse
   const ua = req.headers.get("user-agent") ?? "unknown";
   const al = req.headers.get("accept-language") ?? "unknown";
   return `anon:${ua.slice(0,50)}|${al.slice(0,50)}`;
@@ -30,7 +25,6 @@ function getIp(req: NextRequest) {
 function takeToken(key: string) {
   const now = Date.now();
   const b = buckets.get(key) ?? { tokens: CAPACITY, last: now };
-  // refill
   const elapsed = now - b.last;
   b.tokens = Math.min(CAPACITY, b.tokens + elapsed * FILL_RATE);
   b.last = now;
@@ -46,7 +40,12 @@ function takeToken(key: string) {
 }
 
 export function middleware(req: NextRequest) {
-  // Only guard API routes; allow others through
+  // ✅ Bypass the tracking webhook entirely (no rate limit)
+  if (req.nextUrl.pathname === "/api/shipping/track-webhook") {
+    return NextResponse.next();
+  }
+
+  // Only guard other API routes; allow non-API through
   if (!req.nextUrl.pathname.startsWith('/api/')) return NextResponse.next();
 
   const ip = getIp(req);
