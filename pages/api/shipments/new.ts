@@ -1,106 +1,87 @@
 // pages/api/shipments/new.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { dbConnect } from "@/lib/mongoose"; // <-- named export (fix #1)
-
+import dbConnect from "@/lib/dbConnect";
 import { Shipment } from "@/lib/models/Shipment";
 
-
-/**
- * Minimal payload we expect from the UI's "Proceed" button.
- * (All numbers should already be validated client-side; we re-check here.)
- */
-type CreatePayload = {
-  from: { country: string };
-  to: { country: string; postcode?: string };
-  weightKg: number;
-  dims?: { L?: number; W?: number; H?: number } | null;
-  speed: "standard" | "express";
-  carrier: "DHL" | "Aramex" | "UPS";
-  service?: "standard" | "express";          // we map quote speed => service
-  etaDays?: number;
-  priceAED: number;
-  breakdown?: {
-    baseAED?: number;
-    fuelAED?: number;
-    remoteAED?: number;
-    insuranceAED?: number;
-  };
-};
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const enabled = process.env.SHIPMENTS_ENABLED === "true";
-  if (!enabled) {
-    return res.status(403).json({ ok: false, error: "Shipment creation is disabled for this environment." });
+  // Only POST is supported
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
   }
 
-  
-
-
+  // Feature flag (enable per env)
+  if (process.env.SHIPMENTS_ENABLED !== "true") {
+    return res
+      .status(403)
+      .json({ ok: false, error: "Shipment creation is disabled for this environment." });
+  }
 
   try {
     await dbConnect();
 
-    // Be tolerant about how auth might be attached (fix #2 – don't assume req.user exists)
-    const userId =
-      (req as any)?.user?.id ||
-      (req as any)?.session?.user?.id ||
-      (req as any)?.auth?.userId ||
-      "guest";
+    const b: any = req.body || {};
 
-    const body = (req.body || {}) as Partial<CreatePayload>;
-
-    // Basic validation
-    const weightKg = Number(body.weightKg);
-    if (!body.from?.country || !body.to?.country || !Number.isFinite(weightKg) || weightKg <= 0) {
-      return res.status(400).json({ ok: false, error: "Invalid payload" });
+    // Basic address checks
+    if (!b?.from?.country || !b?.to?.country) {
+      return res.status(400).json({ ok: false, error: "Invalid addresses" });
     }
 
-    const priceAED = Number(body.priceAED);
-    if (!Number.isFinite(priceAED) || priceAED < 0) {
-      return res.status(400).json({ ok: false, error: "Invalid price" });
+    // Accept either b.parcel or (dims + weightKg) and map to required shape
+    const parcel = b.parcel ?? {
+      length: Number(b?.dims?.L ?? b?.length ?? 0),
+      width: Number(b?.dims?.W ?? b?.width ?? 0),
+      height: Number(b?.dims?.H ?? b?.height ?? 0),
+      // allow weightKg (kg) or weight (g) – here we treat provided number as **grams** if > 100,
+      // otherwise as **kg** and convert to grams. Adjust if you store grams vs. kg differently.
+      weight: Number(
+        b?.weight ??
+          (Number.isFinite(b?.weightKg) ? Math.round(Number(b.weightKg) * 1000) : 0)
+      ),
+    };
+
+    // Validate parcel
+    for (const k of ["length", "width", "height", "weight"] as const) {
+      const v = Number((parcel as any)[k]);
+      if (!Number.isFinite(v) || v <= 0) {
+        return res.status(400).json({ ok: false, error: `Invalid parcel.${k}` });
+      }
     }
 
-    // Build the document to match your Shipment schema (no dimsCm/speed-on-option pitfalls)
+    // Build document to match the Shipment schema
     const doc = {
-      userId,
-      createdAt: new Date(),
-      status: "draft",          // or "pending" if you prefer
-      currency: "AED",
-      from: body.from,
-      to: body.to,
-      weightKg,
-      dims: body.dims ?? null,  // keep null if you don't collect dims yet
-      speed: body.speed || "standard",
-      // store the chosen quote as the first/only option for this simple flow
-      options: [
-        {
-          carrier: body.carrier,
-          service: body.service || body.speed || "standard",
-          etaDays: Number(body.etaDays) || null,
-          priceAED,
-          breakdown: {
-            baseAED: Number(body.breakdown?.baseAED) || 0,
-            fuelAED: Number(body.breakdown?.fuelAED) || 0,
-            remoteAED: Number(body.breakdown?.remoteAED) || 0,
-            insuranceAED: Number(body.breakdown?.insuranceAED) || 0,
-          },
-        },
-      ],
+      orderId: b.orderId ?? undefined,
+      currency: (b.currency || "AED").toUpperCase(),
+      to: b.to,
+      from: b.from,
+      parcel,
+      // Optional details
+      carrier: b.carrier ?? undefined,
+      service: b.service ?? undefined,
+      customerEmail: b.customerEmail ?? undefined,
+      // You can start new items as "rated" so they show nicely in admin list
+      status: b.status || "rated",
+      // Optional snapshot of the chosen price (minor units)
+      ratesSnapshot: b.priceAED
+        ? [
+            {
+              carrier: b.carrier ?? null,
+              service: b.service ?? null,
+              amount: Math.round(Number(b.priceAED) * 100) || 0,
+              currency: (b.currency || "AED").toUpperCase(),
+              etaDays: Number.isFinite(b.etaDays) ? Number(b.etaDays) : null,
+            },
+          ]
+        : [],
+      activity: [{ at: new Date(), type: "api:create" }],
     };
 
     const created = await Shipment.create(doc);
-
-    return res.status(200).json({ ok: true, id: String(created._id) });
- 
-} catch (e: unknown) {
-  const msg =
-    e instanceof Error
-      ? e.message
-      : typeof e === "object" && e !== null && "message" in e && typeof (e as any).message === "string"
-      ? (e as { message: string }).message
-      : "Create shipment failed";
-
-  console.error("Server error:", e);
-  return res.status(500).json({ ok: false, error: msg });
-}
+    return res.status(200).json({ ok: true, data: { id: String(created._id) } });
+  } catch (e: any) {
+    const msg =
+      e?.message && typeof e.message === "string" ? e.message : "Create shipment failed";
+    console.error("shipments/new error:", e);
+    return res.status(500).json({ ok: false, error: msg });
+  }
 }
