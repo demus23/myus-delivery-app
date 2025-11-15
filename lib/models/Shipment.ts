@@ -30,10 +30,15 @@ export interface IShipment {
     phone?: string; email?: string;
   };
 
-  parcel: { length: number; width: number; height: number; weight: number };
+  // NEW FIELDS (what /api/shipments/new uses)
+  weightKg: number;
+  dims?: { L?: number; W?: number; H?: number };
 
-  providerShipmentId?: string;         // carrier's shipment id (EP/Shippo/mock)
-  selectedRateId?: string;             // chosen rate object id (carrier side)
+  // Make parcel optional + fields optional, used only for legacy/other flows
+  parcel?: { length?: number; width?: number; height?: number; weight?: number };
+
+  providerShipmentId?: string;
+  selectedRateId?: string;
   carrier?: string;
   service?: string;
   trackingNumber?: string;
@@ -49,6 +54,7 @@ export interface IShipment {
   createdAt: Date;
   updatedAt: Date;
 }
+
 
 const ShipmentSchema = new Schema<IShipment>(
   {
@@ -78,12 +84,22 @@ const ShipmentSchema = new Schema<IShipment>(
       email: String,
     },
 
-    parcel: {
-      length: { type: Number, required: true, min: 0 },
-      width:  { type: Number, required: true, min: 0 },
-      height: { type: Number, required: true, min: 0 },
-      weight: { type: Number, required: true, min: 0 },
-    },
+   // Main dimensions used by the new /api/shipments/new
+weightKg: { type: Number, required: true, min: 0 },
+
+dims: {
+  L: { type: Number, min: 0 },
+  W: { type: Number, min: 0 },
+  H: { type: Number, min: 0 },
+},
+
+// Optional legacy parcel object – NOT required anymore
+parcel: {
+  length: { type: Number, required: false, min: 0 },
+  width:  { type: Number, required: false, min: 0 },
+  height: { type: Number, required: false, min: 0 },
+  weight: { type: Number, required: false, min: 0 },
+},
 
     // NOTE: removed field-level index to avoid duplicate with schema.index below
     providerShipmentId: { type: String },

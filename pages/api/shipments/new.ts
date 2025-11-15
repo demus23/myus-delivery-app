@@ -1,17 +1,39 @@
 // pages/api/shipments/new.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import dbConnect from "@/lib/dbConnect";
+import { dbConnect } from "@/lib/mongoose";
 import { Shipment } from "@/lib/models/Shipment";
 
+type CreatePayload = {
+  orderId?: string;
+  from: { country: string; line1: string; city: string; postalCode?: string; name?: string };
+  to:   { country: string; line1: string; city: string; postalCode?: string; name?: string };
+  weightKg?: number;
+  // optional legacy parcel from old clients
+  parcel?: { length?: number; width?: number; height?: number; weight?: number };
+  dims?: { L?: number; W?: number; H?: number } | null;
+  speed?: "standard" | "express";
+  carrier?: string;
+  service?: string;
+  etaDays?: number;
+  priceAED: number;
+  breakdown?: {
+    baseAED?: number;
+    fuelAED?: number;
+    remoteAED?: number;
+    insuranceAED?: number;
+  };
+  customerEmail?: string | null;
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Only POST is supported
+  // Only allow POST – GET in browser will correctly return Method Not Allowed
   if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
+    res.setHeader("Allow", ["POST"]);
     return res.status(405).json({ ok: false, error: "Method Not Allowed" });
   }
 
-  // Feature flag (enable per env)
-  if (process.env.SHIPMENTS_ENABLED !== "true") {
+  const enabled = process.env.SHIPMENTS_ENABLED === "true";
+  if (!enabled) {
     return res
       .status(403)
       .json({ ok: false, error: "Shipment creation is disabled for this environment." });
@@ -20,68 +42,98 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     await dbConnect();
 
-    const b: any = req.body || {};
+    // Try to grab a user id from any auth mechanism; fall back to "guest"
+    const userId =
+      (req as any)?.user?.id ||
+      (req as any)?.session?.user?.id ||
+      (req as any)?.auth?.userId ||
+      "guest";
 
-    // Basic address checks
-    if (!b?.from?.country || !b?.to?.country) {
-      return res.status(400).json({ ok: false, error: "Invalid addresses" });
+    const body = (req.body || {}) as Partial<CreatePayload>;
+
+    // --- Validation --------------------------------------------------------
+    if (!body.from?.country || !body.from?.line1 || !body.from?.city) {
+      return res.status(400).json({ ok: false, error: "Invalid payload: missing from address" });
     }
 
-    // Accept either b.parcel or (dims + weightKg) and map to required shape
-    const parcel = b.parcel ?? {
-      length: Number(b?.dims?.L ?? b?.length ?? 0),
-      width: Number(b?.dims?.W ?? b?.width ?? 0),
-      height: Number(b?.dims?.H ?? b?.height ?? 0),
-      // allow weightKg (kg) or weight (g) – here we treat provided number as **grams** if > 100,
-      // otherwise as **kg** and convert to grams. Adjust if you store grams vs. kg differently.
-      weight: Number(
-        b?.weight ??
-          (Number.isFinite(b?.weightKg) ? Math.round(Number(b.weightKg) * 1000) : 0)
-      ),
+    if (!body.to?.country || !body.to?.line1 || !body.to?.city) {
+      return res.status(400).json({ ok: false, error: "Invalid payload: missing to address" });
+    }
+
+    const weightKg =
+      typeof body.weightKg === "number"
+        ? body.weightKg
+        : typeof body.parcel?.weight === "number"
+        ? body.parcel.weight
+        : NaN;
+
+    if (!Number.isFinite(weightKg) || weightKg <= 0) {
+      return res.status(400).json({ ok: false, error: "Invalid payload: weightKg is required" });
+    }
+
+    const priceAED = Number(body.priceAED);
+    if (!Number.isFinite(priceAED) || priceAED < 0) {
+      return res.status(400).json({ ok: false, error: "Invalid price" });
+    }
+
+    // --- Build parcel & document ------------------------------------------
+    const parcel = body.parcel ?? {
+      length: body.dims?.L,
+      width: body.dims?.W,
+      height: body.dims?.H,
+      weight: weightKg,
     };
 
-    // Validate parcel
-    for (const k of ["length", "width", "height", "weight"] as const) {
-      const v = Number((parcel as any)[k]);
-      if (!Number.isFinite(v) || v <= 0) {
-        return res.status(400).json({ ok: false, error: `Invalid parcel.${k}` });
-      }
-    }
-
-    // Build document to match the Shipment schema
     const doc = {
-      orderId: b.orderId ?? undefined,
-      currency: (b.currency || "AED").toUpperCase(),
-      to: b.to,
-      from: b.from,
+      userId,
+      orderId: body.orderId,
+      currency: "AED",
+
+      from: body.from,
+      to: body.to,
+
+      weightKg,
+      dims: body.dims ?? undefined,
       parcel,
-      // Optional details
-      carrier: b.carrier ?? undefined,
-      service: b.service ?? undefined,
-      customerEmail: b.customerEmail ?? undefined,
-      // You can start new items as "rated" so they show nicely in admin list
-      status: b.status || "rated",
-      // Optional snapshot of the chosen price (minor units)
-      ratesSnapshot: b.priceAED
-        ? [
-            {
-              carrier: b.carrier ?? null,
-              service: b.service ?? null,
-              amount: Math.round(Number(b.priceAED) * 100) || 0,
-              currency: (b.currency || "AED").toUpperCase(),
-              etaDays: Number.isFinite(b.etaDays) ? Number(b.etaDays) : null,
-            },
-          ]
-        : [],
-      activity: [{ at: new Date(), type: "api:create" }],
+
+      carrier: body.carrier,
+      service: body.service || body.speed || "standard",
+      selectedRateId: undefined,
+      providerShipmentId: undefined,
+
+      customerEmail: body.customerEmail ?? null,
+
+      status: "draft",
+
+      ratesSnapshot: [
+        {
+          carrier: body.carrier,
+          service: body.service || body.speed || "standard",
+          etaDays: body.etaDays ?? null,
+          priceAED,
+          breakdown: {
+            baseAED: Number(body.breakdown?.baseAED) || 0,
+            fuelAED: Number(body.breakdown?.fuelAED) || 0,
+            remoteAED: Number(body.breakdown?.remoteAED) || 0,
+            insuranceAED: Number(body.breakdown?.insuranceAED) || 0,
+          },
+        },
+      ],
+
+      activity: [
+        {
+          at: new Date(),
+          type: "created",
+          payload: { via: "api/shipments/new" },
+        },
+      ],
     };
 
     const created = await Shipment.create(doc);
-    return res.status(200).json({ ok: true, data: { id: String(created._id) } });
+    return res.status(200).json({ ok: true, id: String(created._id) });
   } catch (e: any) {
-    const msg =
-      e?.message && typeof e.message === "string" ? e.message : "Create shipment failed";
-    console.error("shipments/new error:", e);
+    console.error("Create shipment error:", e);
+    const msg = e?.message ?? "Create shipment failed";
     return res.status(500).json({ ok: false, error: msg });
   }
 }
